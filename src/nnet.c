@@ -189,21 +189,19 @@ fpass(Sdata *input, Sdata *goal, Sdata wx, int nr)
 {
     int   i, j;
     double sum, t, thisError;
-#pragma omp parallel shared(sum, Outputs) private(j, i)
-    {
-#pragma omp for
-      for (i = 0; i < Ninputs; i++)
-	Outputs[i + 1] = input[i * nr];
-#pragma omp for 
-      for (j = FirstHidden; j < Nunits; j++) {
-	sum = 0.0;
-	for (i = Nconn[j]; i < Nconn[j + 1]; i++)
-	  sum += Outputs[Conn[i]] * wts[i];
-	if (j < NSunits)
-	  sum = sigmoid(sum);
-	Outputs[j] = sum;
-      }
-    } /* End Parallel Region */
+    #pragma omp parallel for
+    for (i = 0; i < Ninputs; i++)
+      Outputs[i + 1] = input[i * nr];
+    #pragma omp parallel for shared(Outputs) private(i, j, sum)
+    for (j = FirstHidden; j < Nunits; j++) {
+      sum = 0.0;
+      for (i = Nconn[j]; i < Nconn[j + 1]; i++)
+	sum += Outputs[Conn[i]] * wts[i];
+      if (j < NSunits)
+	sum = sigmoid(sum);
+      Outputs[j] = sum;
+    } /* end j loop */
+
     if (Softmax) {
 	sum = 0.0;
 	/* avoid overflows by re-normalizing */
