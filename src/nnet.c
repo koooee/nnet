@@ -189,12 +189,12 @@ fpass(Sdata *input, Sdata *goal, Sdata wx, int nr)
 {
     int   i, j;
     double sum, t, thisError;
-#pragma omp parallel /* shared(a, b, c) private(i) */
+#pragma omp parallel shared(sum, Outputs) private(j, i)
     {
 #pragma omp for
       for (i = 0; i < Ninputs; i++)
 	Outputs[i + 1] = input[i * nr];
-#pragma omp for shared(sum, Outputs) private(j, i)
+#pragma omp for 
       for (j = FirstHidden; j < Nunits; j++) {
 	sum = 0.0;
 	for (i = Nconn[j]; i < Nconn[j + 1]; i++)
