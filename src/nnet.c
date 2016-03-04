@@ -217,7 +217,6 @@ fpass(Sdata *input, Sdata *goal, Sdata wx, int nr)
       }
       Outputs[j] = sum;
     } /* end j loop */
-    Free(sumarray);
 
     if (Softmax) {
 	sum = 0.0;
