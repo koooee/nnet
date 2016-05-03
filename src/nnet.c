@@ -26,6 +26,7 @@
 #include <R.h>
 #include <R_ext/Applic.h>
 #include <math.h>
+#include <stdio.h>
 
 typedef double Sdata;
 
@@ -35,6 +36,7 @@ static double **matrix(int nrh, int nch);
 static void free_matrix(double **m, int nrh, int nch);
 static void fpass(Sdata *input, Sdata *goal, Sdata wx, int nr);
 static void Build_Net(int ninputs, int nhidden, int noutputs);
+static double sum_array(double *a, int len_a, int start, int end);
 
 static int Epoch;
 static double *Decay;
@@ -183,6 +185,18 @@ E(double y, double t)
     return (sum);
 }
 
+/* Helper function to sum an array of doubles */
+/* We need this to make parallelization easier .. sometimes we don't need to keep a running sum which kills concurrency */
+static double sum_array(double *a, int len_a, int start, int end) {
+  double sum = 0.0;
+  if (end <= len_a) {
+    for(int i = start; i < end; i++)
+      sum = sum + a[i];
+  }
+  
+  return (sum);
+}
+
 
 static void
 fpass(Sdata *input, Sdata *goal, Sdata wx, int nr)
@@ -191,16 +205,19 @@ fpass(Sdata *input, Sdata *goal, Sdata wx, int nr)
     double sum, t, thisError;
 
     for (i = 0; i < Ninputs; i++)
-	Outputs[i + 1] = input[i * nr];
-
+      Outputs[i + 1] = input[i * nr];
+    
     for (j = FirstHidden; j < Nunits; j++) {
-	sum = 0.0;
-	for (i = Nconn[j]; i < Nconn[j + 1]; i++)
-	    sum += Outputs[Conn[i]] * wts[i];
-	if (j < NSunits)
-	    sum = sigmoid(sum);
-	Outputs[j] = sum;
-    }
+      sum = 0.0;
+      for (i = Nconn[j]; i < Nconn[j + 1]; i++) {
+        sum += Outputs[Conn[i]] * wts[i];
+      }
+      if (j < NSunits){
+	sum = sigmoid(sum);
+      }
+      Outputs[j] = sum;
+    } /* end j loop */
+
     if (Softmax) {
 	sum = 0.0;
 	/* avoid overflows by re-normalizing */
@@ -284,7 +301,6 @@ bpass(Sdata *goal, Sdata wx)
 	}
     for (i = FirstHidden; i < FirstOutput; i++)
 	ErrorSums[i] = 0.0;
-
     for (j = Nunits - 1; j >= FirstHidden; j--) {
 	Errors[j] = ErrorSums[j];
 	if (j < FirstOutput)
@@ -302,12 +318,12 @@ VR_dfunc(double *p, double *df, double *fp)
 {
     int   i, j;
     double sum1;
-
     for (i = 0; i < Nweights; i++)
 	wts[i] = p[i];
     for (j = 0; j < Nweights; j++)
 	Slopes[j] = 2 * Decay[j] * wts[j];
     TotalError = 0.0;
+    
     for (i = 0; i < NTrain; i++) {
 	for (j = 0; j < Noutputs; j++)
 	    toutputs[j] = TrainOut[i + NTrain * j];
@@ -328,10 +344,10 @@ fminfn(int nn, double *p, void *dummy)
 {
     int   i, j;
     double sum1;
-
     for (i = 0; i < Nweights; i++)
 	wts[i] = p[i];
     TotalError = 0.0;
+#pragma omp parallel for private(j) schedule(static)
     for (i = 0; i < NTrain; i++) {
 	for (j = 0; j < Noutputs; j++)
 	    toutputs[j] = TrainOut[i + NTrain * j];
@@ -349,18 +365,19 @@ static void
 fmingr(int nn, double *p, double *df, void *dummy)
 {
     int   i, j;
-
     for (i = 0; i < Nweights; i++)
 	wts[i] = p[i];
     for (j = 0; j < Nweights; j++)
 	Slopes[j] = 2 * Decay[j] * wts[j];
     TotalError = 0.0;
+#pragma omp parallel for private(j) schedule(static)
     for (i = 0; i < NTrain; i++) {
-	for (j = 0; j < Noutputs; j++)
-	    toutputs[j] = TrainOut[i + NTrain * j];
-	fpass(TrainIn + i, toutputs, Weights[i], NTrain);
-	bpass(toutputs, Weights[i]);
+      for (j = 0; j < Noutputs; j++)
+	toutputs[j] = TrainOut[i + NTrain * j];
+      fpass(TrainIn + i, toutputs, Weights[i], NTrain);
+      bpass(toutputs, Weights[i]);
     }
+    
     for (j = 0; j < Nweights; j++)
 	df[j] = Slopes[j];
     Epoch++;
@@ -539,7 +556,7 @@ pHessian(Sdata *input, Sdata *goal, Sdata wx, int nr)
 				}
 			    }
 			}
-	    }
+	    } /* END for (j2 = Nconn[to2]; j2 < Nconn[to2 + 1]; j2++) */
     } else {			/* Not softmax */
 	for (i = FirstOutput; i < Nunits; i++) {
 	    out = Outputs[i];
